@@ -1427,6 +1427,12 @@ RegisterNUICallback('init', function(data, cb)
 		rotateSpeed = RotateSpeed,
 		favourites = GetFavourites()
 	})
+
+	-- FIXME:
+	-- This shouldn't be necessary, but RedM doesn't appear to free the
+	-- memory allocated for NUI messages, so eventually it causes resource
+	-- memory warnings.
+	collectgarbage()
 end)
 
 RegisterNUICallback('setAdjustSpeed', function(data, cb)
@@ -2637,5 +2643,19 @@ CreateThread(function()
 	while true do
 		Wait(1000)
 		UpdateDbEntities()
+	end
+end)
+
+-- FIXME:
+-- This shouldn't be necessary, but RedM doesn't appear to free the memory
+-- allocated for NUI messages, so eventually it causes resource memory
+-- warnings.
+CreateThread(function()
+	while true do
+		if collectgarbage("count") > 50000 then
+			print("Collecting garbage...")
+			collectgarbage()
+		end
+		Wait(10000)
 	end
 end)
