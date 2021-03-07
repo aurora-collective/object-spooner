@@ -805,6 +805,13 @@ function RequestControl(entity)
 	end
 
 	NetworkRequestControlOfEntity(entity)
+
+	local timeWaited = 0
+
+	while not NetworkHasControlOfEntity(entity) and timeWaited <= 500 do
+		Wait(1)
+		timeWaited = timeWaited + 1
+	end
 end
 
 function CanDeleteEntity(entity)
@@ -2214,6 +2221,7 @@ RegisterNUICallback('setScale', function(data, cb)
 			scale = 10.0
 		end
 
+		RequestControl(data.handle)
 		SetPedScale(data.handle, scale + 0.0)
 
 		if Database[data.handle] then
