@@ -12,6 +12,20 @@ local PlaceOnGround = false
 local CurrentSpawn = nil
 local ShowControls = true
 
+local SpoonerPrompts = UipromptGroup:new("Spooner", false)
+
+local ClearTasksPrompt = SpoonerPrompts:addPrompt(`INPUT_INTERACT_NEG`, "Exit Scenario/Animation")
+ClearTasksPrompt:setHoldMode(true)
+ClearTasksPrompt:setOnHoldModeJustCompleted(function()
+	TryClearTasks(PlayerPedId())
+end)
+
+local DetachPrompt = SpoonerPrompts:addPrompt(`INPUT_INTERACT_LEAD_ANIMAL`, "Detach")
+DetachPrompt:setHoldMode(true)
+DetachPrompt:setOnHoldModeJustCompleted(function()
+	TryDetach(PlayerPedId())
+end)
+
 local StoreDeleted = false
 local DeletedEntities = {}
 
@@ -52,6 +66,7 @@ Permissions.properties.invincible = false
 Permissions.properties.visible = false
 Permissions.properties.gravity = false
 Permissions.properties.collision = false
+Permissions.properties.clone = false
 Permissions.properties.attachments = false
 Permissions.properties.lights = false
 Permissions.properties.registerAsNetworked = false
@@ -69,6 +84,7 @@ Permissions.properties.ped.resurrect = false
 Permissions.properties.ped.ai = false
 Permissions.properties.ped.knockOffProps = false
 Permissions.properties.ped.walkStyle = false
+Permissions.properties.ped.clone = false
 Permissions.properties.ped.cloneToTarget = false
 Permissions.properties.ped.lookAtEntity = false
 Permissions.properties.ped.clean = false
@@ -1544,10 +1560,12 @@ function CloneEntity(entity)
 end
 
 RegisterNUICallback('cloneEntity', function(data, cb)
-	local clone = CloneEntity(data.handle)
+	if Permissions.properties.clone and CanModifyEntity(data.handle) then
+		local clone = CloneEntity(data.handle)
 
-	if clone then
-		OpenPropertiesMenuForEntity(clone)
+		if clone then
+			OpenPropertiesMenuForEntity(clone)
+		end
 	end
 
 	cb({})
@@ -1800,13 +1818,13 @@ RegisterNUICallback('closeMenu', function(data, cb)
 	cb({})
 end)
 
-RegisterNUICallback('detach', function(data, cb)
-	if Permissions.properties.attachments and CanModifyEntity(data.handle) then
-		RequestControl(data.handle)
-		DetachEntity(data.handle, false, true)
+function TryDetach(handle)
+	if Permissions.properties.attachments and CanModifyEntity(handle) then
+		RequestControl(handle)
+		DetachEntity(handle, false, true)
 
-		if EntityIsInDatabase(data.handle) then
-			AddEntityToDatabase(data.handle, nil, {
+		if EntityIsInDatabase(handle) then
+			AddEntityToDatabase(handle, nil, {
 				to = 0,
 				bone = nil,
 				x = 0.0,
@@ -1818,7 +1836,10 @@ RegisterNUICallback('detach', function(data, cb)
 			})
 		end
 	end
+end
 
+RegisterNUICallback('detach', function(data, cb)
+	TryDetach(data.handle)
 	cb({})
 end)
 
@@ -1876,17 +1897,20 @@ RegisterNUICallback('performScenario', function(data, cb)
 	cb({})
 end)
 
-RegisterNUICallback('clearPedTasks', function(data, cb)
-	if Permissions.properties.ped.clearTasks and CanModifyEntity(data.handle) then
-		RequestControl(data.handle)
-		ClearPedTasks(data.handle)
+function TryClearTasks(handle)
+	if Permissions.properties.ped.clearTasks and CanModifyEntity(handle) then
+		RequestControl(handle)
+		ClearPedTasks(handle)
 
-		if Database[data.handle] then
-			Database[data.handle].scenario = nil
-			Database[data.handle].animation = nil
+		if Database[handle] then
+			Database[handle].scenario = nil
+			Database[handle].animation = nil
 		end
 	end
+end
 
+RegisterNUICallback('clearPedTasks', function(data, cb)
+	TryClearTasks(data.handle)
 	cb({})
 end)
 
@@ -2256,6 +2280,20 @@ RegisterNUICallback('selectEntity', function(data, cb)
 	if CanModifyEntity(data.handle) then
 		AttachedEntity = data.handle
 	end
+	cb({})
+end)
+
+function TryClonePed(handle)
+	if Permissions.properties.ped.clone and CanModifyEntity(handle) then
+		RequestControl(handle)
+		local clone = CloneEntity(handle)
+		Citizen.Wait(500)
+		ClonePedToTarget(handle, clone)
+	end
+end
+
+RegisterNUICallback('clonePed', function(data, cb)
+	TryClonePed(data.handle)
 	cb({})
 end)
 
@@ -2724,12 +2762,17 @@ CreateThread(function()
 	TriggerServerEvent('spooner:init')
 
 	while true do
-		Wait(0)
 		MainSpoonerUpdates()
+
+		SpoonerPrompts:handleEvents()
+
+		Wait(0)
 	end
 end)
 
 function UpdateDbEntities()
+	local playerPed = PlayerPedId()
+
 	for entity, properties in pairs(Database) do
 		if not NetworkGetEntityIsNetworked(entity) then
 			NetworkRegisterEntityAsNetworked(entity)
@@ -2741,11 +2784,50 @@ function UpdateDbEntities()
 			if not IsPedUsingScenarioHash(entity, hash) then
 				TaskStartScenarioInPlace(entity, hash, -1)
 			end
-		end
-
-		if properties.animation then
+		elseif properties.animation then
 			if not IsEntityPlayingAnim(entity, properties.animation.dict, properties.animation.name, properties.animation.flag) then
 				PlayAnimation(entity, properties.animation)
+			end
+		end
+
+		-- Show prompts for certain spooner shortcuts on your own ped
+		if entity == playerPed then
+			local enableSpoonerPrompts = false
+
+			if properties.scenario or properties.animation then
+				if Permissions.properties.ped.clearTasks then
+					if not ClearTasksPrompt:isEnabled() then
+						ClearTasksPrompt:setEnabledAndVisible(true)
+					end
+					enableSpoonerPrompts = true
+				end
+			else
+				if ClearTasksPrompt:isEnabled() then
+					ClearTasksPrompt:setEnabledAndVisible(false)
+				end
+			end
+
+			if properties.attachment.to ~= 0 then
+				if Permissions.properties.attachments then
+					if not DetachPrompt:isEnabled() then
+						DetachPrompt:setEnabledAndVisible(true)
+					end
+					enableSpoonerPrompts = true
+				end
+			else
+				if DetachPrompt:isEnabled() then
+					DetachPrompt:setEnabledAndVisible(false)
+				end
+			end
+
+			if enableSpoonerPrompts then
+				if not SpoonerPrompts:isActive() then
+					SpoonerPrompts:setActive(true)
+				end
+			else
+				if SpoonerPrompts:isActive() then
+					SpoonerPrompts:setActive(false)
+				end
 			end
 		end
 	end
