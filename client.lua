@@ -2345,6 +2345,10 @@ RegisterNUICallback('selectEntity', function(data, cb)
 		if AttachedEntity == data.handle then
 			AttachedEntity = nil
 		else
+			if not Cam then
+				EnableSpoonerMode()
+			end
+
 			AttachedEntity = data.handle
 		end
 	end
@@ -2444,6 +2448,10 @@ end
 
 function TryFocusEntity(handle)
 	if Permissions.properties.focus then
+		if not Cam then
+			EnableSpoonerMode()
+		end
+
 		FocusEntity(handle)
 	end
 end
